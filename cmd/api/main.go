@@ -2,12 +2,16 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // A global variable to hold the application
@@ -18,6 +22,9 @@ const version = "1.0.0"
 type config struct {
 	port int
 	env  string
+	db   struct {
+		dsn string
+	}
 }
 
 // Setup dependency injection
@@ -33,9 +40,17 @@ func main() {
 	// the server configuration
 	flag.IntVar(&cfg.port, "port", 4000, "API server port")
 	flag.StringVar(&cfg.env, "env", "development", "Environment(development|staging|production")
+	flag.StringVar(&cfg.db.dsn, "dsn", os.Getenv("LEMON_DB_DSN"), "PostgreSQL DSN")
 	flag.Parse()
 	// Create a logger
 	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime)
+	// setup the database connection pool
+	db, err := openDB(cfg)
+	if err != nil {
+		logger.Fatal(err)
+	}
+	// close the database connection pool
+	defer db.Close()
 	// Create an object of type application
 	app := &application{
 		config: cfg,
@@ -51,6 +66,23 @@ func main() {
 	}
 	// Start our server
 	logger.Printf("starting %s server on port %d", cfg.env, cfg.port)
-	err := srv.ListenAndServe()
+	err = srv.ListenAndServe()
 	logger.Fatal(err)
+}
+
+// Setup up a database connection
+func openDB(cfg config) (*sql.DB, error) {
+	db, err := sql.Open("pgx", cfg.db.dsn)
+	if err != nil {
+		return nil, err
+	}
+	// create a context
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	// ping the database
+	err = db.PingContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
 }
