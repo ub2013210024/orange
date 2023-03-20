@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -10,13 +11,32 @@ import (
 )
 
 func (app *application) createSchoolHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "Created a school...")
+	// create a struct to hold a school that will be provided to us
+	// via request
+	var input struct {
+		Name    string   `json:"name"`
+		Level   string   `json:"level"`
+		Contact string   `json:"contact"`
+		Phone   string   `json:"phone"`
+		Email   string   `json:"email"`
+		Website string   `json:"website,omitempty"`
+		Address string   `json:"address"`
+		Mode    []string `json:"mode"`
+	}
+	// Initialize a new json.Decoder instance
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		app.errorResponse(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	// Print the request
+	fmt.Fprintf(w, "%+v\n", input)
 }
 
 func (app *application) showSchoolHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.readIDParams(r)
 	if err != nil {
-		http.NotFound(w, r)
+		app.notFoundResponse(w, r)
 		return
 	}
 	//fmt.Fprintf(w, "show details of school %d\n", id)
@@ -32,10 +52,9 @@ func (app *application) showSchoolHandler(w http.ResponseWriter, r *http.Request
 		Mode:     []string{"blended", "online", "face-to-face"},
 		Version:  1,
 	}
-	err = app.writeJSON(w, http.StatusOK, school, nil)
+	err = app.writeJSON(w, http.StatusOK, envelope{"school": school}, nil)
 	if err != nil {
-		app.logger.Println(err)
-		http.Error(w, "the server encountered a problem and could not process your request", http.StatusInternalServerError)
+		app.serverErrorResponse(w, r, err)
 		return
 	}
 }
