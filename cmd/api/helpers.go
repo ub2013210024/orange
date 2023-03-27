@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/julienschmidt/httprouter"
 )
@@ -42,14 +43,24 @@ func (app *application) writeJSON(w http.ResponseWriter, status int, data envelo
 }
 
 func (app *application) readJSON(w http.ResponseWriter, r *http.Request, destination interface{}) error {
-	// we will try to decode a json request
-	err := json.NewDecoder(r.Body).Decode(destination)
+	// specify the max size of our JSON request body
+	maxBytes := 1_048_576
+	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBytes))
+	// we will try to decode the json request
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	// start the decoding
+	err := dec.Decode(destination)
+
+	// err := json.NewDecoder(r.Body).Decode(destination)
 	if err != nil {
 		// something went wrong
 		// let's find out the type of error
 		var syntaxError *json.SyntaxError
 		var unMarshallTypeError *json.UnmarshalTypeError
 		var invalidUnmarshallError *json.InvalidUnmarshalError
+		// check for max bytes
+		var maxBytesError *http.MaxBytesError
 		// let's check for the type of decode error
 		switch {
 		case errors.As(err, &syntaxError):
@@ -58,19 +69,30 @@ func (app *application) readJSON(w http.ResponseWriter, r *http.Request, destina
 		case errors.Is(err, io.ErrUnexpectedEOF):
 			return errors.New("body contains badly-formed JSON")
 		case errors.As(err, &unMarshallTypeError):
+			// which field has the wrong type
 			if unMarshallTypeError.Field != "" {
 				return fmt.Errorf("body contains incorrect JSON type for field %q",
 					unMarshallTypeError.Field)
 			}
-			return fmt.Errorf("body contains empty JSON field", unMarshallTypeError.Field)
+			return fmt.Errorf("body contains badly formed JSON(at character %d)", unMarshallTypeError.Offset)
 		case errors.Is(err, io.EOF):
 			return errors.New("body must not be empty")
+			// unmappable field/ not existent field
+		case strings.HasPrefix(err.Error(), "JSON: unknown field "):
+			fieldName := strings.TrimPrefix(err.Error(), "json: unknown field ")
+			return fmt.Errorf("body contains unknown key %s", fieldName)
+		case errors.As(err, &maxBytesError):
+			return fmt.Errorf("body must not be larger than %d bytes", maxBytesError.Limit)
 		case errors.As(err, &invalidUnmarshallError):
 			panic(err)
 		default:
 			return err
 		}
-
+	}
+	// Let's call the decoder again to check if there are any trailing json objects
+	err = dec.Decode(&struct{}{})
+	if err != io.EOF {
+		return errors.New("body must only contain a single json value")
 	}
 	return nil
 }

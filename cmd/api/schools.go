@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lewisdalwin/orange/internal/data"
+	"github.com/ub2013210024/orange/internal/data"
 )
 
 func (app *application) createSchoolHandler(w http.ResponseWriter, r *http.Request) {
